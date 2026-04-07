@@ -1,6 +1,6 @@
 import os
 import time
-import importlib
+import cv2
 import pandas as pd
 import numpy as np
 import requests
@@ -52,40 +52,36 @@ except Exception as e:
     st.error(f"Could not load YOLO model: {e}")
 
 if model_ready:
-    if not cv2_available:
-        st.warning("OpenCV is not installed in this environment. Vision features are disabled.")
+    use_webcam = st.checkbox("Use local webcam (works in local desktop run)", value=False)
+
+    if use_webcam:
+        camera = cv2.VideoCapture(0)
+        ok, frame = camera.read()
+        camera.release()
+
+        if not ok:
+            st.warning("Webcam frame unavailable. On Streamlit Cloud, use image upload mode instead.")
+        else:
+            results = model.predict(frame, conf=0.4, verbose=False)
+            annotated = results[0].plot()
+            annotated = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
+            st.image(annotated, caption="Webcam frame with detections", use_container_width=True)
     else:
-        cv2 = get_cv2_module()
-        use_webcam = st.checkbox("Use local webcam (works in local desktop run)", value=False)
-
-        if use_webcam:
-            camera = cv2.VideoCapture(0)
-            ok, frame = camera.read()
-            camera.release()
-
-            if not ok:
-                st.warning("Webcam frame unavailable. On Streamlit Cloud, use image upload mode instead.")
+        uploaded = st.file_uploader("Upload a floor image", type=["jpg", "jpeg", "png"])
+        if uploaded is not None:
+            file_bytes = uploaded.read()
+            img_array = cv2.imdecode(
+                np.frombuffer(file_bytes, dtype="uint8"), cv2.IMREAD_COLOR  # type: ignore[attr-defined]
+            )
+            if img_array is None:
+                st.error("Could not decode uploaded image.")
             else:
-                results = model.predict(frame, conf=0.4, verbose=False)
+                results = model.predict(img_array, conf=0.4, verbose=False)
                 annotated = results[0].plot()
                 annotated = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
-                st.image(annotated, caption="Webcam frame with detections", use_container_width=True)
+                st.image(annotated, caption="Uploaded image with detections", use_container_width=True)
         else:
-            uploaded = st.file_uploader("Upload a floor image", type=["jpg", "jpeg", "png"])
-            if uploaded is not None:
-                file_bytes = uploaded.read()
-                img_array = cv2.imdecode(
-                    np.frombuffer(file_bytes, dtype="uint8"), cv2.IMREAD_COLOR
-                )
-                if img_array is None:
-                    st.error("Could not decode uploaded image.")
-                else:
-                    results = model.predict(img_array, conf=0.4, verbose=False)
-                    annotated = results[0].plot()
-                    annotated = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
-                    st.image(annotated, caption="Uploaded image with detections", use_container_width=True)
-            else:
-                st.info("Upload an image to run detection.")
+            st.info("Upload an image to run detection.")
 
 st.divider()
 
