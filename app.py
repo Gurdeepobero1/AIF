@@ -14,6 +14,15 @@ st.set_page_config(page_title="Factory Command Center", layout="wide")
 st.title("🏭 Automated Shop-Floor Command Center")
 st.markdown("Real-time monitoring for machine status and production metrics.")
 
+cv2_available = importlib.util.find_spec("cv2") is not None
+
+
+def get_cv2_module():
+    if not cv2_available:
+        return None
+    return importlib.import_module("cv2")
+
+
 # 2. --- TOP-LEVEL METRICS ---
 col1, col2, col3 = st.columns(3)
 col1.metric("Spindle Temperature", "72°C", "1.2°C")
