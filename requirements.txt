@@ -1,0 +1,7 @@
+streamlit
+pandas
+numpy
+ultralytics
+paho-mqtt
+requests
+opencv-python-headless
