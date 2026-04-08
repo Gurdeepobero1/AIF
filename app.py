@@ -7,7 +7,10 @@ import requests
 import streamlit as st
 from ultralytics import YOLO
 import paho.mqtt.client as mqtt
-import importlib.util  # FIXED: Missing import added
+import importlib.util
+
+# Force Ultralytics to use a writable directory immediately to prevent boot hanging
+os.environ["YOLO_CONFIG_DIR"] = "/tmp/Ultralytics"
 
 # 1. --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Factory Command Center", layout="wide")
@@ -36,7 +39,6 @@ st.caption("Run object detection on a webcam frame (local) or uploaded image (cl
 
 @st.cache_resource
 def load_model():
-    # FIXED: Removed pointless ternary logic. 
     return YOLO("yolov8n.pt")
 
 try:
@@ -83,12 +85,11 @@ st.divider()
 
 # 4. --- LIVE MACHINE DATA & ALERTS (REAL MQTT) ---
 st.subheader("📈 Live Machine Data Feed")
-st.caption("Topic: factory/machine_a/temp (HiveMQ public broker)")
+st.caption("Topic: factory/machine_a/temp (HiveMQ public broker via WebSockets)")
 
 if "machine_data" not in st.session_state:
     st.session_state["machine_data"] = []
 
-# FIXED: Callback signatures updated to match MQTT VERSION2
 def on_connect(client, userdata, flags, reason_code, properties):
     if reason_code == 0:
         client.subscribe("factory/machine_a/temp")
@@ -105,11 +106,11 @@ def on_message(client, userdata, msg):
 
 @st.cache_resource
 def get_mqtt_client():
-    # FIXED: Unified MQTT versioning to VERSION2 to prevent crashes on paho-mqtt v2.0+
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    # WebSocket transport on port 8000 bypasses strict cloud firewalls
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, transport="websockets")
     client.on_connect = on_connect
     client.on_message = on_message
-    client.connect("broker.hivemq.com", 1883, 60)
+    client.connect("broker.hivemq.com", 8000, 60)
     client.loop_start()
     return client
 
@@ -120,7 +121,6 @@ except Exception as e:
     mqtt_connected = False
     st.warning(f"MQTT broker connection unavailable right now: {e}")
 
-# FIXED: Isolated the live refresh logic. Only this specific component will refresh every 1 second.
 @st.fragment(run_every=1)
 def display_live_data():
     if mqtt_connected and len(st.session_state["machine_data"]) > 0:
@@ -168,5 +168,3 @@ if audio_value is not None:
                     st.error(f"API Error: {response.status_code} - {response.text}")
             except Exception as e:
                 st.error(f"Failed to connect to Sarvam AI: {e}")
-
-# FIXED: Global rerun loop has been entirely deleted.
