@@ -7,6 +7,7 @@ import requests
 import streamlit as st
 from ultralytics import YOLO
 import paho.mqtt.client as mqtt
+import importlib.util  # FIXED: Missing import added
 
 # 1. --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Factory Command Center", layout="wide")
@@ -16,12 +17,10 @@ st.markdown("Real-time monitoring for machine status and production metrics.")
 
 cv2_available = importlib.util.find_spec("cv2") is not None
 
-
 def get_cv2_module():
     if not cv2_available:
         return None
     return importlib.import_module("cv2")
-
 
 # 2. --- TOP-LEVEL METRICS ---
 col1, col2, col3 = st.columns(3)
@@ -35,13 +34,10 @@ st.divider()
 st.subheader("📹 Floor Monitoring (AI Enabled)")
 st.caption("Run object detection on a webcam frame (local) or uploaded image (cloud).")
 
-
 @st.cache_resource
 def load_model():
-    # Uses local file if present; otherwise lets Ultralytics fetch the official small model.
-    model_source = "yolov8n.pt" if os.path.exists("yolov8n.pt") else "yolov8n.pt"
-    return YOLO(model_source)
-
+    # FIXED: Removed pointless ternary logic. 
+    return YOLO("yolov8n.pt")
 
 try:
     model = load_model()
@@ -71,7 +67,7 @@ if model_ready:
         if uploaded is not None:
             file_bytes = uploaded.read()
             img_array = cv2.imdecode(
-                np.frombuffer(file_bytes, dtype="uint8"), cv2.IMREAD_COLOR  # type: ignore[attr-defined]
+                np.frombuffer(file_bytes, dtype="uint8"), cv2.IMREAD_COLOR
             )
             if img_array is None:
                 st.error("Could not decode uploaded image.")
@@ -92,11 +88,10 @@ st.caption("Topic: factory/machine_a/temp (HiveMQ public broker)")
 if "machine_data" not in st.session_state:
     st.session_state["machine_data"] = []
 
-
-def on_connect(client, userdata, flags, rc):
-    if rc == 0:
+# FIXED: Callback signatures updated to match MQTT VERSION2
+def on_connect(client, userdata, flags, reason_code, properties):
+    if reason_code == 0:
         client.subscribe("factory/machine_a/temp")
-
 
 def on_message(client, userdata, msg):
     payload = msg.payload.decode("utf-8")
@@ -108,16 +103,15 @@ def on_message(client, userdata, msg):
     except ValueError:
         pass
 
-
 @st.cache_resource
 def get_mqtt_client():
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
+    # FIXED: Unified MQTT versioning to VERSION2 to prevent crashes on paho-mqtt v2.0+
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     client.on_connect = on_connect
     client.on_message = on_message
     client.connect("broker.hivemq.com", 1883, 60)
     client.loop_start()
     return client
-
 
 try:
     get_mqtt_client()
@@ -126,20 +120,25 @@ except Exception as e:
     mqtt_connected = False
     st.warning(f"MQTT broker connection unavailable right now: {e}")
 
-if mqtt_connected and len(st.session_state["machine_data"]) > 0:
-    latest_temp = st.session_state["machine_data"][-1]
+# FIXED: Isolated the live refresh logic. Only this specific component will refresh every 1 second.
+@st.fragment(run_every=1)
+def display_live_data():
+    if mqtt_connected and len(st.session_state["machine_data"]) > 0:
+        latest_temp = st.session_state["machine_data"][-1]
 
-    if latest_temp > 78.0:
-        st.error(f"🚨 CRITICAL WARNING: Spindle Temperature Overheating at {latest_temp}°C!")
-    elif latest_temp > 76.0:
-        st.warning(f"⚠️ CAUTION: Temperature rising ({latest_temp}°C). Monitor closely.")
+        if latest_temp > 78.0:
+            st.error(f"🚨 CRITICAL WARNING: Spindle Temperature Overheating at {latest_temp}°C!")
+        elif latest_temp > 76.0:
+            st.warning(f"⚠️ CAUTION: Temperature rising ({latest_temp}°C). Monitor closely.")
+        else:
+            st.success(f"✅ Machine operating normally at {latest_temp}°C.")
+
+        df = pd.DataFrame(st.session_state["machine_data"], columns=["Machine A Temp (°C)"])
+        st.line_chart(df)
     else:
-        st.success(f"✅ Machine operating normally at {latest_temp}°C.")
+        st.info("Waiting for machine data... Run machine_simulator.py locally to publish sample values.")
 
-    df = pd.DataFrame(st.session_state["machine_data"], columns=["Machine A Temp (°C)"])
-    st.line_chart(df)
-else:
-    st.info("Waiting for machine data... Run machine_simulator.py locally to publish sample values.")
+display_live_data()
 
 st.divider()
 
@@ -170,6 +169,4 @@ if audio_value is not None:
             except Exception as e:
                 st.error(f"Failed to connect to Sarvam AI: {e}")
 
-# 6. --- AUTO REFRESH LOOP ---
-time.sleep(1)
-st.rerun()
+# FIXED: Global rerun loop has been entirely deleted.
