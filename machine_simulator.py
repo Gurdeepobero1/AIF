@@ -2,8 +2,8 @@ import time
 import random
 import paho.mqtt.client as mqtt
 
-# Connect to the exact same public broker as your dashboard
-client = mqtt.Client()
+# Connect to the public broker
+client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 client.connect("broker.hivemq.com", 1883, 60)
 
 print("⚙️  Simulating CNC Machine A...")
