@@ -10,6 +10,7 @@ import paho.mqtt.client as mqtt
 import importlib.util
 import av
 from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
+from collections import deque
 
 # Force Ultralytics to use a writable directory immediately
 os.environ["YOLO_CONFIG_DIR"] = "/tmp/Ultralytics"
@@ -55,18 +56,28 @@ if model_ready:
     input_mode = st.radio("Select Vision Mode", ["Live Cloud Video (WebRTC)", "Static Image Upload"])
 
     if input_mode == "Live Cloud Video (WebRTC)":
-        # STUN server for basic NAT traversal. Will fail on strict corporate firewalls without a TURN fallback.
+        # Dynamic ICE server fetching for NAT traversal (Requires Twilio for production)
+        @st.cache_data
+        def get_ice_servers():
+            try:
+                from twilio.rest import Client
+                twilio_sid = st.secrets["TWILIO_ACCOUNT_SID"]
+                twilio_token = st.secrets["TWILIO_AUTH_TOKEN"]
+                client = Client(twilio_sid, twilio_token)
+                token = client.tokens.create()
+                return token.ice_servers
+            except Exception:
+                # Fallback to STUN. Will fail on strict corporate networks.
+                return [{"urls": ["stun:stun.l.google.com:19302"]}]
+
         RTC_CONFIGURATION = RTCConfiguration(
-            {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+            {"iceServers": get_ice_servers()}
         )
 
         def video_frame_callback(frame: av.VideoFrame) -> av.VideoFrame:
             img = frame.to_ndarray(format="bgr24")
-            
-            # Run YOLO inference
             results = model.predict(img, conf=0.4, verbose=False)
             annotated = results[0].plot()
-            
             return av.VideoFrame.from_ndarray(annotated, format="bgr24")
 
         webrtc_streamer(
@@ -81,18 +92,12 @@ if model_ready:
         uploaded = st.file_uploader("Upload a floor image", type=["jpg", "jpeg", "png"])
         if uploaded is not None:
             file_bytes = uploaded.read()
-            img_array = cv2.imdecode(
-                np.frombuffer(file_bytes, dtype="uint8"), cv2.IMREAD_COLOR
-            )
-            if img_array is None:
-                st.error("Could not decode uploaded image.")
-            else:
+            img_array = cv2.imdecode(np.frombuffer(file_bytes, dtype="uint8"), cv2.IMREAD_COLOR)
+            if img_array is not None:
                 results = model.predict(img_array, conf=0.4, verbose=False)
                 annotated = results[0].plot()
                 annotated = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
                 st.image(annotated, caption="Uploaded image with detections", use_container_width=True)
-        else:
-            st.info("Upload an image to run detection.")
 
 st.divider()
 
@@ -100,8 +105,12 @@ st.divider()
 st.subheader("📈 Live Machine Data Feed")
 st.caption("Topic: factory/machine_a/temp (HiveMQ public broker via WebSockets)")
 
-if "machine_data" not in st.session_state:
-    st.session_state["machine_data"] = []
+# THREAD-SAFE DATA BUFFER: Streamlit state cannot be updated from background threads safely.
+@st.cache_resource
+def get_data_buffer():
+    return deque(maxlen=20)
+
+data_buffer = get_data_buffer()
 
 def on_connect(client, userdata, flags, reason_code, properties):
     if reason_code == 0:
@@ -111,9 +120,7 @@ def on_message(client, userdata, msg):
     payload = msg.payload.decode("utf-8")
     try:
         temp_value = float(payload)
-        st.session_state["machine_data"].append(temp_value)
-        if len(st.session_state["machine_data"]) > 20:
-            st.session_state["machine_data"].pop(0)
+        data_buffer.append(temp_value)
     except ValueError:
         pass
 
@@ -135,8 +142,8 @@ except Exception as e:
 
 @st.fragment(run_every=1)
 def display_live_data():
-    if mqtt_connected and len(st.session_state["machine_data"]) > 0:
-        latest_temp = st.session_state["machine_data"][-1]
+    if mqtt_connected and len(data_buffer) > 0:
+        latest_temp = data_buffer[-1]
 
         if latest_temp > 78.0:
             st.error(f"🚨 CRITICAL WARNING: Spindle Temperature Overheating at {latest_temp}°C!")
@@ -145,7 +152,7 @@ def display_live_data():
         else:
             st.success(f"✅ Machine operating normally at {latest_temp}°C.")
 
-        df = pd.DataFrame(st.session_state["machine_data"], columns=["Machine A Temp (°C)"])
+        df = pd.DataFrame(list(data_buffer), columns=["Machine A Temp (°C)"])
         st.line_chart(df)
     else:
         st.info("Waiting for machine data... Run machine_simulator.py locally to publish sample values.")
