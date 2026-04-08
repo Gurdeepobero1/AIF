@@ -5,3 +5,5 @@ ultralytics
 paho-mqtt
 requests
 opencv-python-headless
+streamlit-webrtc
+av

@@ -8,8 +8,10 @@ import streamlit as st
 from ultralytics import YOLO
 import paho.mqtt.client as mqtt
 import importlib.util
+import av
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 
-# Force Ultralytics to use a writable directory immediately to prevent boot hanging
+# Force Ultralytics to use a writable directory immediately
 os.environ["YOLO_CONFIG_DIR"] = "/tmp/Ultralytics"
 
 # 1. --- PAGE CONFIGURATION ---
@@ -35,7 +37,7 @@ st.divider()
 
 # 3. --- AI-ENABLED CAMERA SECTION ---
 st.subheader("📹 Floor Monitoring (AI Enabled)")
-st.caption("Run object detection on a webcam frame (local) or uploaded image (cloud).")
+st.caption("Live browser streaming (WebRTC) or static image upload.")
 
 @st.cache_resource
 def load_model():
@@ -50,20 +52,31 @@ except Exception as e:
     st.error(f"Could not load YOLO model: {e}")
 
 if model_ready:
-    use_webcam = st.checkbox("Use local webcam (works in local desktop run)", value=False)
+    input_mode = st.radio("Select Vision Mode", ["Live Cloud Video (WebRTC)", "Static Image Upload"])
 
-    if use_webcam:
-        camera = cv2.VideoCapture(0)
-        ok, frame = camera.read()
-        camera.release()
+    if input_mode == "Live Cloud Video (WebRTC)":
+        # STUN server for basic NAT traversal. Will fail on strict corporate firewalls without a TURN fallback.
+        RTC_CONFIGURATION = RTCConfiguration(
+            {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+        )
 
-        if not ok:
-            st.warning("Webcam frame unavailable. On Streamlit Cloud, use image upload mode instead.")
-        else:
-            results = model.predict(frame, conf=0.4, verbose=False)
+        def video_frame_callback(frame: av.VideoFrame) -> av.VideoFrame:
+            img = frame.to_ndarray(format="bgr24")
+            
+            # Run YOLO inference
+            results = model.predict(img, conf=0.4, verbose=False)
             annotated = results[0].plot()
-            annotated = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
-            st.image(annotated, caption="Webcam frame with detections", use_container_width=True)
+            
+            return av.VideoFrame.from_ndarray(annotated, format="bgr24")
+
+        webrtc_streamer(
+            key="factory-monitor",
+            mode=WebRtcMode.SENDRECV,
+            rtc_configuration=RTC_CONFIGURATION,
+            video_frame_callback=video_frame_callback,
+            media_stream_constraints={"video": True, "audio": False},
+            async_processing=True,
+        )
     else:
         uploaded = st.file_uploader("Upload a floor image", type=["jpg", "jpeg", "png"])
         if uploaded is not None:
@@ -106,7 +119,6 @@ def on_message(client, userdata, msg):
 
 @st.cache_resource
 def get_mqtt_client():
-    # WebSocket transport on port 8000 bypasses strict cloud firewalls
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, transport="websockets")
     client.on_connect = on_connect
     client.on_message = on_message
