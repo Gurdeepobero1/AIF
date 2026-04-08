@@ -17,83 +17,72 @@ import random
 os.environ["YOLO_CONFIG_DIR"] = "/tmp/Ultralytics"
 
 # 1. --- PAGE CONFIGURATION & CUSTOM CSS ---
-st.set_page_config(page_title="ACME Sentinel | Neural Operations", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="ACME Sentinel | SCADA Operations", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
     <style>
-    /* Aggressive styling for a tech-forward look */
-    .block-container { padding-top: 1.5rem !important; padding-bottom: 1rem !important; }
+    /* Brutalist / Industrial SCADA Styling */
+    body { background-color: #050505; color: #e0e0e0; }
+    .block-container { padding-top: 1rem !important; max-width: 95%; }
     header {visibility: hidden;}
     
     /* Neumorphic/Cyber Metrics */
     div[data-testid="metric-container"] {
-        background: linear-gradient(145deg, #1e1e1e, #252525);
-        border: 1px solid #333;
-        padding: 20px;
-        border-radius: 10px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-        border-left: 4px solid #00f2fe;
+        background: #0a0a0a;
+        border: 1px solid #222;
+        padding: 15px;
+        border-radius: 4px;
+        border-top: 3px solid #ff3333;
+        box-shadow: inset 0 0 10px rgba(255,51,51,0.05);
+        font-family: 'Courier New', monospace;
     }
     
     /* Terminal-style AI Log */
     .ai-log-box {
-        background-color: #0a0a0a;
-        color: #00ff41;
+        background-color: #030303;
+        color: #ff3333;
         font-family: 'Courier New', Courier, monospace;
-        padding: 15px;
-        border-radius: 5px;
+        padding: 10px;
+        border-radius: 2px;
         border: 1px solid #333;
-        height: 250px;
+        height: 300px;
         overflow-y: hidden;
-        font-size: 0.85rem;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 1px;
     }
     
-    hr { border-top: 1px solid rgba(255,255,255,0.1); }
+    .status-nominal { color: #00ff41; }
+    .status-warn { color: #ff9900; }
+    .status-crit { color: #ff3333; font-weight: bold; }
+    
+    hr { border-top: 1px solid #222; margin: 1rem 0; }
     </style>
 """, unsafe_allow_html=True)
 
 cv2_available = importlib.util.find_spec("cv2") is not None
 
-def get_cv2_module():
-    if not cv2_available: return None
-    return importlib.import_module("cv2")
+# 2. --- MAIN DASHBOARD HEADER ---
+st.markdown("<h2 style='font-family: monospace; color: #fff;'>ACME CORP // GLOBAL OPERATIONS SEC-04</h2>", unsafe_allow_html=True)
+st.caption("TACTICAL SCADA & NEURAL VISION SUBSYSTEM | CLEARANCE: OMEGA")
+st.divider()
 
-# 2. --- SIDEBAR (CREDENTIALS & AI STATUS) ---
-with st.sidebar:
-    st.markdown("### 🌐 ACME Corporation")
-    st.caption("SENTINEL NEURAL ENGINE v4.0")
-    st.divider()
-    
-    st.subheader("Operator Sync")
-    st.markdown("**ID:** ACME-OP-77")
-    st.markdown("**Clearance:** OMEGA")
-    
-    st.divider()
-    st.subheader("Core Systems")
-    st.markdown("🧠 **Sentinel AI:** ACTIVE")
-    st.markdown("📡 **Telemetry Grid:** SYNCED")
-    st.markdown("👁️ **Spatial Vision:** ONLINE")
-
-# 3. --- MAIN DASHBOARD HEADER ---
-st.title("ACME Global Operations Node")
-st.markdown("Continuous AI inference and spatial monitoring active.")
-
-# 4. --- TOP-LEVEL KPI METRICS ---
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Spindle Core Temp", "72.4°C", "Stable")
-col2.metric("Yield Rate", "1,240 U/hr", "+2.4%")
-col3.metric("System Entropy", "12.4%", "-0.5%")
-col4.metric("Anomaly Detections", "0", "Clear")
+# 3. --- TOP-LEVEL KPI METRICS ---
+col1, col2, col3, col4, col5 = st.columns(5)
+col1.metric("Spindle Core", "72.4°C", "NOMINAL", delta_color="off")
+col2.metric("OEE Yield", "94.2%", "+1.2%", delta_color="normal")
+col3.metric("Network Latency", "14ms", "-2ms", delta_color="inverse")
+col4.metric("Active Hazards", "1", "PPE VIOLATION", delta_color="inverse")
+col5.metric("System Entropy", "0.04", "STABLE", delta_color="off")
 
 st.divider()
 
-# 5. --- CORE DASHBOARD GRID ---
-vision_col, telemetry_col, ai_col = st.columns([2.5, 2, 1.5], gap="large")
+# 4. --- CORE DASHBOARD GRID ---
+vision_col, telemetry_col, ai_col = st.columns([2.5, 2, 1.5], gap="small")
 
-# VISION LAYER
+# VISION LAYER WITH HUD OVERLAY
 with vision_col:
-    st.subheader("👁️ Sentinel Vision Stream")
-    st.caption("Real-time YOLOv8 spatial awareness.")
+    st.markdown("<h4 style='font-family: monospace;'>[ VISION FEED : NODE 01 ]</h4>", unsafe_allow_html=True)
     
     @st.cache_resource
     def load_model():
@@ -108,50 +97,65 @@ with vision_col:
         st.error(f"Vision Core Offline: {e}")
 
     if model_ready:
-        input_mode = st.radio("Vision Source", ["Live Neural Stream", "Static Data Ingestion"], horizontal=True, label_visibility="collapsed")
+        @st.cache_data
+        def get_ice_servers():
+            try:
+                from twilio.rest import Client
+                twilio_sid = st.secrets["TWILIO_ACCOUNT_SID"]
+                twilio_token = st.secrets["TWILIO_AUTH_TOKEN"]
+                client = Client(twilio_sid, twilio_token)
+                return client.tokens.create().ice_servers
+            except Exception:
+                return [{"urls": ["stun:stun.l.google.com:19302"]}]
 
-        if input_mode == "Live Neural Stream":
-            @st.cache_data
-            def get_ice_servers():
-                try:
-                    from twilio.rest import Client
-                    twilio_sid = st.secrets["TWILIO_ACCOUNT_SID"]
-                    twilio_token = st.secrets["TWILIO_AUTH_TOKEN"]
-                    client = Client(twilio_sid, twilio_token)
-                    return client.tokens.create().ice_servers
-                except Exception:
-                    return [{"urls": ["stun:stun.l.google.com:19302"]}]
+        RTC_CONFIGURATION = RTCConfiguration({"iceServers": get_ice_servers()})
 
-            RTC_CONFIGURATION = RTCConfiguration({"iceServers": get_ice_servers()})
+        def video_frame_callback(frame: av.VideoFrame) -> av.VideoFrame:
+            img = frame.to_ndarray(format="bgr24")
+            results = model.predict(img, conf=0.4, verbose=False)
+            
+            # Detect Human (Class 0)
+            human_detected = False
+            for box in results[0].boxes:
+                if int(box.cls[0]) == 0:
+                    human_detected = True
+                    break
+            
+            annotated = results[0].plot()
+            
+            # INJECT MILITARY-GRADE HUD OVERLAY IF HUMAN DETECTED
+            if human_detected:
+                # Flashing red border simulation
+                overlay = annotated.copy()
+                cv2.rectangle(overlay, (0, 0), (overlay.shape[1], overlay.shape[0]), (0, 0, 255), 15)
+                
+                # Scanlines / HUD Text
+                cv2.putText(overlay, "!! BIO-SIGNATURE DETECTED !!", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                cv2.putText(overlay, "INITIATING PPE SCAN...", (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                cv2.putText(overlay, "ERR: HARDHAT NOT FOUND.", (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                cv2.putText(overlay, "ERR: HIGH-VIS VEST NOT FOUND.", (20, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                cv2.putText(overlay, "ACTION: LOGGING SAFETY VIOLATION", (20, 170), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                
+                # Blend overlay for HUD effect
+                alpha = 0.8
+                annotated = cv2.addWeighted(overlay, alpha, annotated, 1 - alpha, 0)
+            else:
+                cv2.putText(annotated, "SECTOR CLEAR", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-            def video_frame_callback(frame: av.VideoFrame) -> av.VideoFrame:
-                img = frame.to_ndarray(format="bgr24")
-                results = model.predict(img, conf=0.4, verbose=False)
-                annotated = results[0].plot()
-                return av.VideoFrame.from_ndarray(annotated, format="bgr24")
+            return av.VideoFrame.from_ndarray(annotated, format="bgr24")
 
-            webrtc_streamer(
-                key="acme-vision",
-                mode=WebRtcMode.SENDRECV,
-                rtc_configuration=RTC_CONFIGURATION,
-                video_frame_callback=video_frame_callback,
-                media_stream_constraints={"video": True, "audio": False},
-                async_processing=True,
-            )
-        else:
-            uploaded = st.file_uploader("Upload Frame Data", type=["jpg", "jpeg", "png"])
-            if uploaded is not None:
-                file_bytes = uploaded.read()
-                img_array = cv2.imdecode(np.frombuffer(file_bytes, dtype="uint8"), cv2.IMREAD_COLOR)
-                if img_array is not None:
-                    results = model.predict(img_array, conf=0.4, verbose=False)
-                    annotated = results[0].plot()
-                    st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), use_container_width=True)
+        webrtc_streamer(
+            key="acme-vision",
+            mode=WebRtcMode.SENDRECV,
+            rtc_configuration=RTC_CONFIGURATION,
+            video_frame_callback=video_frame_callback,
+            media_stream_constraints={"video": True, "audio": False},
+            async_processing=True,
+        )
 
 # TELEMETRY LAYER
 with telemetry_col:
-    st.subheader("📈 Live Telemetry Matrix")
-    st.caption("CNC Unit Alpha - Spindle Core (°C)")
+    st.markdown("<h4 style='font-family: monospace;'>[ TELEMETRY : ALPHA CORE ]</h4>", unsafe_allow_html=True)
 
     @st.cache_resource
     def get_data_buffer():
@@ -187,62 +191,59 @@ with telemetry_col:
     def display_live_data():
         if mqtt_connected and len(data_buffer) > 0:
             df = pd.DataFrame(list(data_buffer), columns=["Temp (°C)"])
-            st.area_chart(df, height=250, use_container_width=True, color="#00f2fe")
+            st.area_chart(df, height=350, use_container_width=True, color="#ff3333")
         else:
-            st.info("Awaiting telemetry sync... Start edge simulator.")
+            st.info("AWAITING MQTT HANDSHAKE...")
 
     display_live_data()
 
-# AI PREDICTIVE LAYER
+# HEURISTICS LAYER
 with ai_col:
-    st.subheader("🧠 Neural Engine")
-    st.caption("Predictive Heuristics Stream")
+    st.markdown("<h4 style='font-family: monospace;'>[ NEURAL HEURISTICS ]</h4>", unsafe_allow_html=True)
     
     @st.fragment(run_every=2)
     def ai_inference_log():
+        log_entries = [
+            f"[{time.strftime('%H:%M:%S')}] SYS: WATCHDOG THREAD ACTIVE",
+            f"[{time.strftime('%H:%M:%S')}] NET: LATENCY 14MS",
+            "-----------------------------------"
+        ]
+        
         if len(data_buffer) > 0:
             latest = data_buffer[-1]
-            log_entries = []
+            log_entries.append(f"[{time.strftime('%H:%M:%S')}] TELEMETRY INGEST: {latest:.2f}°C")
             
-            # Simulate active AI reasoning based on live data
-            log_entries.append(f"> INGEST: Temp {latest:.2f}°C")
             if latest > 78.0:
-                log_entries.append("> ALERT: Thermal runaway detected. Intervention recommended.")
-                log_entries.append("> PREDICTION: Failure in 4.2 mins.")
-            elif latest > 76.0:
-                log_entries.append("> WARN: Deviation from baseline.")
-                log_entries.append("> ACTION: Adjusting coolant flow +12%.")
+                log_entries.append(f"<span class='status-crit'>[{time.strftime('%H:%M:%S')}] CRIT: THERMAL RUNAWAY.</span>")
+                log_entries.append(f"<span class='status-crit'>[{time.strftime('%H:%M:%S')}] ACT: ENGAGING EMERGENCY COOLANT.</span>")
             else:
-                log_entries.append("> STATUS: Sub-system nominal.")
-                log_entries.append(f"> EFFICIENCY: {random.uniform(92.0, 99.9):.1f}% optimal.")
-            
-            log_entries.append("> NET: Secure.")
-            log_entries.append("> CYCLE: " + str(time.time())[-6:])
-            
-            # Render terminal UI
-            log_text = "<br>".join(log_entries)
-            st.markdown(f'<div class="ai-log-box">{log_text}</div>', unsafe_allow_html=True)
-        else:
-            st.markdown('<div class="ai-log-box">> WAITING FOR DATA STREAM...</div>', unsafe_allow_html=True)
+                log_entries.append(f"<span class='status-nominal'>[{time.strftime('%H:%M:%S')}] THERMAL CORE STABLE.</span>")
+        
+        # Simulated Vision Heuristics
+        log_entries.append("-----------------------------------")
+        log_entries.append(f"[{time.strftime('%H:%M:%S')}] VIS: FRAME CAPTURE PROCESSED")
+        log_entries.append(f"<span class='status-warn'>[{time.strftime('%H:%M:%S')}] WARN: CONTINUOUS SCAN FOR BIO-SIGNATURES.</span>")
+        log_entries.append(f"[{time.strftime('%H:%M:%S')}] VIS: YOLO_INFERENCE_TIME: {random.uniform(8.0, 15.0):.2f}MS")
+
+        log_text = "<br>".join(log_entries)
+        st.markdown(f'<div class="ai-log-box">{log_text}</div>', unsafe_allow_html=True)
 
     ai_inference_log()
 
 st.divider()
 
-# 6. --- UTILITY ACTIONS ---
-with st.expander("🎙️ ACME Neural Scribe (Voice Dictation)"):
-    st.caption("Securely dictate engineering logs via Sarvam AI API.")
+# 5. --- UTILITY ACTIONS ---
+with st.expander("[ DICTATION TERMINAL ]"):
     sarvam_key = st.secrets.get("SARVAM_API_KEY", os.getenv("SARVAM_API_KEY", ""))
-    
     audio_col, text_col = st.columns([1, 2])
     with audio_col:
-        audio_value = st.audio_input("Record Log Entry")
+        audio_value = st.audio_input("TRANSMIT AUDIO COMMAND")
     with text_col:
         if audio_value is not None:
             if not sarvam_key:
-                st.warning("Transcription blocked: Missing API Authorization.")
-            elif st.button("Process Audio Log"):
-                with st.spinner("Decoding audio vector..."):
+                st.error("ERR: SARVAM API UNAUTHENTICATED.")
+            elif st.button("EXECUTE TRANSCRIPTION"):
+                with st.spinner("DECODING..."):
                     try:
                         response = requests.post(
                             "https://api.sarvam.ai/speech-to-text", 
@@ -251,9 +252,9 @@ with st.expander("🎙️ ACME Neural Scribe (Voice Dictation)"):
                             timeout=60
                         )
                         if response.status_code == 200:
-                            st.success("Transcription complete.")
-                            st.text_area("Parsed Output:", value=response.json().get("transcript", ""), height=100)
+                            st.success("DECODE SUCCESSFUL.")
+                            st.text_area("RAW OUTPUT:", value=response.json().get("transcript", ""), height=100)
                         else:
-                            st.error(f"API Error {response.status_code}: {response.text}")
+                            st.error(f"ERR {response.status_code}: {response.text}")
                     except Exception as e:
-                        st.error(f"Network failure reaching Sarvam nodes: {e}")
+                        st.error(f"ERR CONNECTION FAILED: {e}")
