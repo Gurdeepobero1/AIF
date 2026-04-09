@@ -6,5 +6,5 @@ paho-mqtt==2.1.0
 requests==2.33.1
 opencv-python-headless==4.10.0.84
 streamlit-webrtc==0.47.9
-av==12.3.0
+av>=12.3.0
 twilio==9.4.2
