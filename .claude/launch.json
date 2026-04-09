@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Streamlit App",
+      "runtimeExecutable": "/Users/gdpso/Desktop/factory_ai_center/factory_ai_center/.venv/bin/python",
+      "runtimeArgs": ["-m", "streamlit", "run", "app.py", "--server.port=8501"],
+      "port": 8501
+    },
+    {
+      "name": "MQTT Sensor Simulator",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["machine_simulator.py"],
+      "port": 1883
+    }
+  ]
+}
