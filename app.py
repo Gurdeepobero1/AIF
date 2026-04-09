@@ -1,3 +1,4 @@
+import logging
 import os
 import time
 import json
@@ -8,13 +9,26 @@ import requests
 import streamlit as st
 from ultralytics import YOLO
 import paho.mqtt.client as mqtt
-import importlib.util
 import av
 from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 from collections import deque
 
-# Force Ultralytics to use a writable directory immediately
+# Force Ultralytics to use a writable directory (required for read-only cloud filesystems)
 os.environ["YOLO_CONFIG_DIR"] = "/tmp/Ultralytics"
+
+logging.basicConfig(level=logging.WARNING)
+logger = logging.getLogger(__name__)
+
+# --- CONSTANTS ---
+MQTT_BROKER = "broker.hivemq.com"
+MQTT_PORT = 8000
+MQTT_TOPIC = "acme/factory/sensors/node_1"
+SENSOR_BUFFER_SIZE = 50
+TEMP_THRESHOLD = 80.0
+VIB_THRESHOLD = 5.0
+YOLO_CONF_THRESHOLD = 0.5
+SARVAM_API_URL = "https://api.sarvam.ai/speech-to-text"
+SARVAM_TIMEOUT = 60
 
 # 1. --- PAGE CONFIGURATION & SCADA CSS ---
 st.set_page_config(page_title="ACME Sentinel | SCADA HMI", layout="wide", initial_sidebar_state="collapsed")
@@ -61,37 +75,38 @@ st.divider()
 # 3. --- THREAD-SAFE SENSOR BUFFER (EXPECTING JSON FROM REAL HARDWARE) ---
 @st.cache_resource
 def get_sensor_buffer():
-    # Stores parsed JSON objects from physical sensors
-    return deque(maxlen=50)
+    return deque(maxlen=SENSOR_BUFFER_SIZE)
 
 sensor_data = get_sensor_buffer()
 
 def on_connect(client, userdata, flags, reason_code, properties):
-    if reason_code == 0: 
-        client.subscribe("acme/factory/sensors/node_1")
+    if reason_code == 0:
+        client.subscribe(MQTT_TOPIC)
+    else:
+        logger.warning("MQTT connect failed with code: %s", reason_code)
 
 def on_message(client, userdata, msg):
     try:
-        # We now expect a real IoT JSON payload, e.g., {"temp": 45.2, "vib": 0.8, "pressure": 110}
         payload = json.loads(msg.payload.decode("utf-8"))
         payload["timestamp"] = time.strftime('%H:%M:%S')
         sensor_data.append(payload)
-    except Exception:
-        pass # Ignore malformed packets
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        logger.warning("Malformed MQTT packet dropped: %s", exc)
 
 @st.cache_resource
 def get_mqtt_client():
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, transport="websockets")
     client.on_connect = on_connect
     client.on_message = on_message
-    client.connect("broker.hivemq.com", 8000, 60)
+    client.connect(MQTT_BROKER, MQTT_PORT, 60)
     client.loop_start()
     return client
 
 try:
     get_mqtt_client()
     mqtt_active = True
-except Exception:
+except OSError as exc:
+    logger.error("MQTT broker unreachable: %s", exc)
     mqtt_active = False
 
 # 4. --- DASHBOARD GRID ---
@@ -105,23 +120,22 @@ with vision_col:
     def load_model():
         return YOLO("yolov8n.pt")
 
+    @st.cache_data(ttl=3600)
+    def get_ice_servers():
+        try:
+            from twilio.rest import Client
+            twilio_client = Client(st.secrets["TWILIO_ACCOUNT_SID"], st.secrets["TWILIO_AUTH_TOKEN"])
+            return twilio_client.tokens.create().ice_servers
+        except Exception:
+            return [{"urls": ["stun:stun.l.google.com:19302"]}]
+
     try:
         model = load_model()
-        @st.cache_data
-        def get_ice_servers():
-            try:
-                from twilio.rest import Client
-                client = Client(st.secrets["TWILIO_ACCOUNT_SID"], st.secrets["TWILIO_AUTH_TOKEN"])
-                return client.tokens.create().ice_servers
-            except Exception:
-                return [{"urls": ["stun:stun.l.google.com:19302"]}]
 
         def video_frame_callback(frame: av.VideoFrame) -> av.VideoFrame:
             img = frame.to_ndarray(format="bgr24")
-            results = model.predict(img, conf=0.5, verbose=False)
+            results = model.predict(img, conf=YOLO_CONF_THRESHOLD, verbose=False)
             annotated = results[0].plot()
-            
-            # Simple SCADA HUD Overlay
             cv2.putText(annotated, f"ACME VIS-CORE // {time.strftime('%H:%M:%S')}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
             return av.VideoFrame.from_ndarray(annotated, format="bgr24")
 
@@ -133,7 +147,8 @@ with vision_col:
             media_stream_constraints={"video": True, "audio": False},
             async_processing=True,
         )
-    except Exception as e:
+    except Exception as exc:
+        logger.error("Vision module failed to load: %s", exc)
         st.error("Optical Core Offline. Connect physical camera and grant permissions.")
 
 # --- COLUMN 2: LIVE PHYSICAL SENSORS (MQTT) ---
@@ -156,8 +171,8 @@ with sensor_col:
         v_val = latest.get("vib", 0.0)
 
         # Dynamic metric rendering based on real hardware thresholds
-        st.metric("Thermocouple (T-1)", f"{t_val:.1f} °C", "NOMINAL" if t_val < 80 else "OVERHEATING")
-        st.metric("Piezo Vibration (V-1)", f"{v_val:.2f} mm/s", "STABLE" if v_val < 5.0 else "FATIGUE WARNING")
+        st.metric("Thermocouple (T-1)", f"{t_val:.1f} °C", "NOMINAL" if t_val < TEMP_THRESHOLD else "OVERHEATING")
+        st.metric("Piezo Vibration (V-1)", f"{v_val:.2f} mm/s", "STABLE" if v_val < VIB_THRESHOLD else "FATIGUE WARNING")
 
         # Plotting the hardware buffer
         df = pd.DataFrame(list(sensor_data))
@@ -175,7 +190,7 @@ with mic_col:
     
     st.markdown("<br><h4 style='font-family: monospace;'>[ ACOUSTIC ANALYSIS ]</h4>", unsafe_allow_html=True)
     sarvam_key = st.secrets.get("SARVAM_API_KEY", os.getenv("SARVAM_API_KEY", ""))
-    
+
     if audio_value is not None:
         if not sarvam_key:
             st.error("AUTH ERR: SARVAM NEURAL ENGINE DISCONNECTED.")
@@ -183,17 +198,18 @@ with mic_col:
             with st.spinner("ANALYZING AUDIO SIGNATURE..."):
                 try:
                     response = requests.post(
-                        "https://api.sarvam.ai/speech-to-text", 
-                        headers={"api-subscription-key": sarvam_key}, 
-                        files={"file": ("log.wav", audio_value.getvalue(), "audio/wav")}, 
-                        timeout=60
+                        SARVAM_API_URL,
+                        headers={"api-subscription-key": sarvam_key},
+                        files={"file": ("log.wav", audio_value.getvalue(), "audio/wav")},
+                        timeout=SARVAM_TIMEOUT,
                     )
-                    if response.status_code == 200:
-                        st.success("ACOUSTIC DECODE SUCCESS.")
-                        st.markdown(f"<div class='terminal-box'>{response.json().get('transcript', '')}</div>", unsafe_allow_html=True)
-                    else:
-                        st.error(f"ENGINE FAULT: {response.status_code}")
-                except Exception as e:
-                    st.error(f"PACKET LOSS: {e}")
+                    response.raise_for_status()
+                    st.success("ACOUSTIC DECODE SUCCESS.")
+                    st.markdown(f"<div class='terminal-box'>{response.json().get('transcript', '')}</div>", unsafe_allow_html=True)
+                except requests.HTTPError as exc:
+                    st.error(f"ENGINE FAULT: {exc.response.status_code}")
+                except requests.RequestException as exc:
+                    logger.error("Sarvam API request failed: %s", exc)
+                    st.error(f"PACKET LOSS: {exc}")
 
 st.divider()

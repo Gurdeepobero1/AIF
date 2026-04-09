@@ -1,29 +1,29 @@
+import json
 import time
 import random
 import paho.mqtt.client as mqtt
 
-# Connect to the public broker
-client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-client.connect("broker.hivemq.com", 1883, 60)
+BROKER_HOST = "broker.hivemq.com"
+BROKER_PORT = 1883
+TOPIC = "acme/factory/sensors/node_1"
 
-print("⚙️  Simulating CNC Machine A...")
-print("📡 Publishing temperature data to 'factory/machine_a/temp'")
-print("🛑 Press Ctrl+C to stop")
+client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+client.connect(BROKER_HOST, BROKER_PORT, 60)
+
+print("Simulating Factory Node 1...")
+print(f"Publishing JSON to '{TOPIC}'")
+print("Press Ctrl+C to stop")
 
 try:
     while True:
-        # Generate a realistic operating temperature (e.g., around 75°C)
-        base_temp = 75.0
-        fluctuation = random.uniform(-5.0, 5.0)
-        current_temp = round(base_temp + fluctuation, 2)
-        
-        # Publish the data to the MQTT topic
-        client.publish("factory/machine_a/temp", current_temp)
-        print(f"Published: {current_temp}°C")
-        
-        # Wait for 2 seconds before sending the next reading
+        payload = {
+            "temp": round(75.0 + random.uniform(-5.0, 10.0), 2),
+            "vib": round(2.5 + random.uniform(-1.0, 3.0), 3),
+        }
+        client.publish(TOPIC, json.dumps(payload))
+        print(f"Published: {payload}")
         time.sleep(2)
 
 except KeyboardInterrupt:
-    print("\nMachine Simulation Stopped.")
+    print("\nSimulation stopped.")
     client.disconnect()
